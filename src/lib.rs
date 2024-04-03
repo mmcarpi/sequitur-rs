@@ -267,6 +267,7 @@ impl Sequitur {
     fn ensure_rule_usage(&mut self, rule: RuleLabel) {}
 
     fn remove_digram_from_registry(&mut self, digram: Digram) {
+        println!("Removing digram {:?}", digram);
         for elem in vec![digram.0, digram.1] {
             match self.is_rule(elem) {
                 Some(rule_idx) => {
@@ -309,15 +310,14 @@ impl Sequitur {
         let new_rule = self.new_rule();
         println!("Inserting {:?}", digram);
         self.drule.insert(digram, new_rule);
+        
+
 
         // Push the data for this digram
         // TODO: Reuse some already created rule
-        self.rule_push_back(new_rule, digram.0);
+        let digram_start = self.rule_push_back(new_rule, digram.0);
         self.rule_push_back(new_rule, digram.1);
-
-        // Now we remove the nodes
-        // TODO: Perhaps write it for both nodes before trying to generalize
-
+        self.digram.insert(digram, digram_start.expect("Newly created digram"));
         println!("Before poping");
         self.debug();
         let mut new_positions: Vec<Link> = vec![];
@@ -490,6 +490,7 @@ impl Sequitur {
     }
 
     fn pop_and_fix(&mut self, pos: usize) -> Node {
+        println!("pop_and_fix({:4})", pos);
         let node = self.node[pos].take().expect("Should be a bug!");
         let next_node_add = node.get_next();
         let prev_node_add = node.get_prev();
@@ -654,6 +655,23 @@ mod sequitur_tests {
                 (97, 98),   // ab
             ])
         );
+    }
+
+    #[test]
+    fn paper_example() {
+        let mut seq = Sequitur::new();
+        // let input = "abcdbcabcd".as_bytes();
+        let input = "abcdbcabc".as_bytes();
+
+        let compressed = seq.compress(input);
+        let digramset: HashSet<Digram> = seq.get_digrams();
+
+        println!("digramset={:?}", digramset);
+        seq.debug();
+        assert_eq!(
+            digramset,
+            HashSet::from([
+            ]));
     }
 
     //#[test]
