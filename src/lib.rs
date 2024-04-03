@@ -64,6 +64,37 @@ impl Node {
     }
 }
 
+pub struct Rule {
+    pos: Link,
+    cnt: usize,
+}
+
+impl Rule {
+    pub fn new(pos: Link) -> Self {
+        Rule {
+            cnt: 0,
+            pos: pos,
+        }
+    }
+
+    pub fn up(&mut self) {
+        self.cnt += 1;
+    }
+
+    pub fn down(&mut self) -> Option<Link> {
+        match self.cnt == 0 {
+            true => panic!("Rule counter is already zero."),
+            false => {
+                self.cnt -= 1;
+                match self.cnt == 0 {
+                    true => Some(self.pos),
+                    false => None,
+                }
+            }
+        }
+    }
+}
+
 type RuleLabel = usize;
 type Digram = (Elem, Elem);
 type DigramPos = (Link, Link);
@@ -74,9 +105,9 @@ use std::collections::{HashMap, HashSet};
 pub struct Sequitur {
     node: Vec<Option<Node>>,
     memo: Vec<usize>,
-    rule: Vec<(Link, usize)>,
+    rule: Vec<Rule>,
     digram: HashMap<Digram, usize>,
-    drule: HashMap<Digram, usize>,
+    drule: HashMap<Digram, RuleLabel>,
     rule_start: usize,
 }
 
@@ -113,7 +144,7 @@ impl Sequitur {
     fn new_rule(&mut self) -> RuleLabel {
         let free_pos = self.next_free_pos();
         let rule_label = self.rule_start + self.rule.len(); // This may overflow but it is what it is
-        self.rule.push((free_pos, 0));
+        self.rule.push(Rule::new(free_pos));
         self.insert_new_node(
             free_pos,
             Node::Guard {
@@ -131,17 +162,37 @@ impl Sequitur {
         }
     }
 
-    fn add_rule_usage(&mut self, rule: RuleLabel, pos: Link) {
+    fn add_rule_usage(&mut self, rule: RuleLabel) {
+        match self.is_rule(rule) {
+            Some(rule_idx) => {
+                self.rule[rule_idx].up();
+            }
+            None => {
+                panic!("{} does not correspond to a rule.", rule);
+            }
+        }
     }
 
     fn remove_rule_usage(&mut self, rule: RuleLabel, pos: Link) {
+        match self.is_rule(rule) {
+            Some(rule_idx) => {
+                // Rewrite in some more meaningfull way
+                match self.rule[rule_idx].down() {
+                    Some(rule_pos) => todo!("Implement rule usage"),
+                    None => { /* Do nothing */ }
+                }
+            }
+            None  => {
+                panic!("{} does not correspond to a rule.", rule);
+            }
+        }
     }
 
     pub fn rule_push_back(&mut self, rule: RuleLabel, elem: Elem) -> Option<Link> {
         match self.is_rule(rule) {
             None => None,
             Some(rule_idx) => {
-                let pos = self.rule[rule_idx].0;
+                let pos = self.rule[rule_idx].pos;
                 match &self.node[pos] {
                     Some(node) => match &self.node[node.get_prev()] {
                         Some(_other_node) => match self.insert_after(node.get_prev(), elem) {
@@ -176,7 +227,7 @@ impl Sequitur {
     pub fn fetch_rule(&self, rule: RuleLabel) -> Vec<(Elem, Elem, Elem, Elem)> {
         let mut v = vec![];
 
-        let mut curr_node_add = self.rule[rule].0;
+        let mut curr_node_add = self.rule[rule].pos;
         let start_node = curr_node_add;
         while let Some(node) = &self.node[curr_node_add] {
             match node {
