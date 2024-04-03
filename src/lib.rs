@@ -65,7 +65,8 @@ impl Node {
 }
 
 type RuleLabel = usize;
-type Digram = (usize, usize);
+type Digram = (Elem, Elem);
+type DigramPos = (Link, Link);
 type Elem = usize;
 
 use std::collections::{HashMap, HashSet};
@@ -112,7 +113,7 @@ impl Sequitur {
     fn new_rule(&mut self) -> RuleLabel {
         let free_pos = self.next_free_pos();
         let rule_label = self.rule_start + self.rule.len(); // This may overflow but it is what it is
-        self.rule.push((free_pos, 1));
+        self.rule.push((free_pos, 0));
         self.insert_new_node(
             free_pos,
             Node::Guard {
@@ -128,6 +129,12 @@ impl Sequitur {
             true => None,
             false => Some(rule - self.rule_start),
         }
+    }
+
+    fn add_rule_usage(&mut self, rule: RuleLabel, pos: Link) {
+    }
+
+    fn remove_rule_usage(&mut self, rule: RuleLabel, pos: Link) {
     }
 
     pub fn rule_push_back(&mut self, rule: RuleLabel, elem: Elem) -> Option<Link> {
@@ -208,7 +215,7 @@ impl Sequitur {
 
     fn ensure_rule_usage(&mut self, rule: RuleLabel) {}
 
-    fn remove_digram(&mut self, digram: Digram) {
+    fn remove_digram_from_registry(&mut self, digram: Digram) {
         for elem in vec![digram.0, digram.1] {
             match self.is_rule(elem) {
                 Some(rule_idx) => {
@@ -218,6 +225,27 @@ impl Sequitur {
             }
         }
         self.digram.remove(&digram);
+    }
+
+    fn remove_digram_starting_at(&mut self, digram_start: Link) -> (Link, Vec<Digram>) {
+        let old_node: Node = self.pop_and_fix(digram_start);
+        let old_next_node: Node = self.pop_and_fix(old_node.get_next());
+        let mut old_digrams: Vec<Digram> = vec![];
+        match self.node[old_node.get_prev()]
+            .as_ref()
+            .expect("Node should exist")
+        {
+            Node::Elem { elem, .. } => old_digrams.push((*elem, old_node.get_elem())),
+            _else => {}
+        }
+        match self.node[old_next_node.get_next()]
+            .as_ref()
+            .expect("Node should exist")
+        {
+            Node::Elem { elem, .. } => old_digrams.push((old_next_node.get_elem(), *elem)),
+            _else => {}
+        }
+        (old_node.get_prev(), old_digrams)
     }
 
     fn ensure_digram_uniqueness(&mut self, digram: Digram, pointer: Vec<Link>) {
@@ -241,51 +269,21 @@ impl Sequitur {
 
         println!("Before poping");
         self.debug();
-        let mut new_pointers: Vec<Link> = vec![];
-        let mut old_digrams = vec![];
+        let mut new_positions: Vec<Link> = vec![];
         for &p in &pointer {
-            let old_node: Node = self.pop_and_fix(p);
-            let old_next_node: Node = self.pop_and_fix(old_node.get_next());
-
-            match self.node[old_node.get_prev()]
-                .as_ref()
-                .expect("Node should exist")
-            {
-                Node::Elem { elem, .. } => old_digrams.push((*elem, old_node.get_elem())),
-                _else => {}
+            let (new_pos, old_digrams) = self.remove_digram_starting_at(p);
+            new_positions.push(new_pos);
+            for &odigram in &old_digrams {
+                self.remove_digram_from_registry(odigram);
             }
-
-            match self.node[old_next_node.get_next()]
-                .as_ref()
-                .expect("Node should exist")
-            {
-                Node::Elem { elem, .. } => old_digrams.push((old_next_node.get_elem(), *elem)),
-                _else => {}
-            }
-
-            new_pointers.push(old_node.get_prev());
         }
 
         println!("\nAfter poping\n");
-        println!("old_digrams={:?}", old_digrams);
-        println!("\nnew_pointers={:?}", new_pointers);
+        println!("\nnew_positions={:?}", new_positions);
 
-        for &digram in &old_digrams {
-            self.remove_digram(digram);
-        }
-
-        self.debug();
-
-        let mut final_pointers = vec![];
-        for &p in &new_pointers {
-            final_pointers.push(self.insert_after_and_fix(p, new_rule));
-            // TODO: Use insert after p to add a new node with the rule
-            // self.node[p] = Some(
-            //     self.node[p]
-            //         .as_ref()
-            //         .expect("Node is the second element of a old digram")
-            //         .set_elem(new_rule),
-            // );
+        let mut final_positions = vec![];
+        for &p in &new_positions {
+            final_positions.push(self.insert_after_and_fix(p, new_rule));
         }
 
         println!("\nAfter new_pointers update\n");
@@ -293,7 +291,7 @@ impl Sequitur {
 
         let mut new_digrams = HashSet::new();
 
-        for &p in &final_pointers {
+        for &p in &final_positions {
             match self.node[p]
                 .as_ref()
                 .expect("Node is the second element of a old digram")
@@ -307,7 +305,6 @@ impl Sequitur {
                         Node::Elem {
                             elem: prev_elem, ..
                         } => {
-                            //self.add_digram((*prev_elem, *curr_elem), *prev);
                             new_digrams.insert(((*prev_elem, *curr_elem), *prev));
                         }
                         _else => { /* We do not care */ }
@@ -317,7 +314,6 @@ impl Sequitur {
                         Node::Elem {
                             elem: next_elem, ..
                         } => {
-                            //self.add_digram((*curr_elem, *next_elem), p);
                             new_digrams.insert(((*curr_elem, *next_elem), p));
                         }
                         _else => { /* We do not care */ }
@@ -337,51 +333,12 @@ impl Sequitur {
 
         println!("\nBefore trully exiting poping\n");
         self.debug();
-
-        // // Now we change self.node[node.next] the next
-        // self.node[curr_node_add] = Some(self.node[curr_node_add].as_ref().unwrap().set_elem(new_rule));
-
-        // // Now we add the newly created digrams and their start positions
-        // let curr_node = self.node[curr_node_add].as_ref().expect("Node should exist");
-        // let prev_node_add = curr_node.get_prev();
-        // let next_node_add = curr_node.get_next();
-
-        // //// Notice that neither prev_node nor next_node must must exist
-        // if let Some(prev_node) = self.node[prev_node_add].as_ref() {
-        //     match prev_node {
-        //         Node::Elem { elem, .. } => {
-        //             self.digram.insert((*elem, new_rule), prev_node_add);
-        //         },
-        //         _else => { /* Do nothing */ },
-        //     }
-        // }
-
-        // if let Some(next_node) = self.node[next_node_add].as_ref() {
-        //     match next_node {
-        //         Node::Elem { elem, .. } => {
-        //             self.digram.insert((new_rule, *elem), curr_node_add);
-        //         },
-        //         _else => { /* Do nothing */ },
-        //     }
-        // }
-
-        // let prev_node = node.prev;
-        // self.digram.insert((new_rule, self.node[prev_node].elem), p);
-        // todo!("^^^^^^^^^^^^^^^^^^^^^^^^^");
-
-        //todo!("Ensure digram uniqueness");
     }
 
     fn get_digrams(&self) -> HashSet<(usize, usize)> {
-        // let drule : HashSet<(Elem, Elem)> = self.drule.keys().map(
-        //     |&(d0, d1)| (d0, d1)
-        // ).collect();
-
         let digram: HashSet<(Elem, Elem)> = self.digram.keys().map(|&(d0, d1)| (d0, d1)).collect();
 
         digram
-        // (drule.union(&digram)).map(
-        //    |&(d0, d1)| (d0, d1)).collect()
     }
 
     fn add_digram(&mut self, digram: Digram, pos: usize) {
