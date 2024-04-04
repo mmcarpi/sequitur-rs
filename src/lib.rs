@@ -2,21 +2,21 @@ type Link = usize;
 
 enum Node {
     Guard { prev: Link, next: Link },
-    Elem { elem: usize, prev: Link, next: Link },
+    Gram { gram: usize, prev: Link, next: Link },
 }
 
 impl Node {
     fn get_prev(&self) -> Link {
         match self {
             Node::Guard { prev, .. } => *prev,
-            Node::Elem { prev, .. } => *prev,
+            Node::Gram { prev, .. } => *prev,
         }
     }
 
     fn get_next(&self) -> Link {
         match self {
             Node::Guard { next, .. } => *next,
-            Node::Elem { next, .. } => *next,
+            Node::Gram { next, .. } => *next,
         }
     }
 
@@ -26,8 +26,8 @@ impl Node {
                 prev: new_prev,
                 next: *next,
             },
-            Node::Elem { elem, next, .. } => Node::Elem {
-                elem: *elem,
+            Node::Gram { gram, next, .. } => Node::Gram {
+                gram: *gram,
                 prev: new_prev,
                 next: *next,
             },
@@ -40,26 +40,26 @@ impl Node {
                 prev: *prev,
                 next: new_next,
             },
-            Node::Elem { elem, prev, .. } => Node::Elem {
-                elem: *elem,
+            Node::Gram { gram, prev, .. } => Node::Gram {
+                gram: *gram,
                 prev: *prev,
                 next: new_next,
             },
         }
     }
 
-    fn set_elem(&self, new_elem: usize) -> Node {
-        Node::Elem {
-            elem: new_elem,
+    fn set_gram(&self, new_gram: usize) -> Node {
+        Node::Gram {
+            gram: new_gram,
             next: self.get_next(),
             prev: self.get_prev(),
         }
     }
 
-    fn get_elem(&self) -> usize {
+    fn get_gram(&self) -> usize {
         match self {
-            Node::Elem { elem, .. } => *elem,
-            Node::Guard { .. } => panic!("Tried to get_elem from guard node"),
+            Node::Gram { gram, .. } => *gram,
+            Node::Guard { .. } => panic!("Tried to get_gram from guard node"),
         }
     }
 }
@@ -71,10 +71,7 @@ pub struct Rule {
 
 impl Rule {
     pub fn new(pos: Link) -> Self {
-        Rule {
-            cnt: 0,
-            pos: pos,
-        }
+        Rule { cnt: 0, pos: pos }
     }
 
     pub fn up(&mut self) {
@@ -96,9 +93,9 @@ impl Rule {
 }
 
 type RuleLabel = usize;
-type Digram = (Elem, Elem);
+type Digram = (Gram, Gram);
 type DigramPos = (Link, Link);
-type Elem = usize;
+type Gram = usize;
 
 use std::collections::{HashMap, HashSet};
 
@@ -162,6 +159,10 @@ impl Sequitur {
         }
     }
 
+    fn rule_label_to_rule_idx(&self, rule_label: RuleLabel) -> Link {
+        rule_label - self.rule_start
+    }
+
     fn add_rule_usage(&mut self, rule: RuleLabel) {
         match self.is_rule(rule) {
             Some(rule_idx) => {
@@ -182,30 +183,28 @@ impl Sequitur {
                     None => { /* Do nothing */ }
                 }
             }
-            None  => {
+            None => {
                 panic!("{} does not correspond to a rule.", rule);
             }
         }
     }
 
-    pub fn rule_push_back(&mut self, rule: RuleLabel, elem: Elem) -> Option<Link> {
+    pub fn rule_push_back(&mut self, rule: RuleLabel, gram: Gram) -> Link {
         match self.is_rule(rule) {
-            None => None,
+            None => panic!("Rule {} does not exist.", rule),
             Some(rule_idx) => {
                 let pos = self.rule[rule_idx].pos;
                 match &self.node[pos] {
                     Some(node) => match &self.node[node.get_prev()] {
-                        Some(_other_node) => match self.insert_after(node.get_prev(), elem) {
-                            Some(new_pos) => {
-                                self.node[pos] =
-                                    Some(self.node[pos].as_ref().unwrap().set_prev(new_pos));
-                                Some(new_pos)
-                            }
-                            None => None,
-                        },
-                        None => self.insert_after(pos, elem),
+                        Some(_other_node) => {
+                            let new_pos = self.insert_after_and_fix(node.get_prev(), gram);
+                            self.node[pos] =
+                                Some(self.node[pos].as_ref().unwrap().set_prev(new_pos));
+                            new_pos
+                        }
+                        None => self.insert_after_and_fix(pos, gram),
                     },
-                    None => None,
+                    None => panic!("Rule {} does not have a guard node.", rule),
                 }
             }
         }
@@ -224,7 +223,7 @@ impl Sequitur {
         }
     }
 
-    pub fn fetch_rule(&self, rule: RuleLabel) -> Vec<(Elem, Elem, Elem, Elem)> {
+    pub fn fetch_rule(&self, rule: RuleLabel) -> Vec<(Gram, Gram, Gram, Gram)> {
         let mut v = vec![];
 
         let mut curr_node_add = self.rule[rule].pos;
@@ -232,7 +231,7 @@ impl Sequitur {
         while let Some(node) = &self.node[curr_node_add] {
             match node {
                 Node::Guard { prev, next } => v.push((curr_node_add, 666 as usize, *next, *prev)),
-                Node::Elem { elem, prev, next } => v.push((curr_node_add, *elem, *next, *prev)),
+                Node::Gram { gram, prev, next } => v.push((curr_node_add, *gram, *next, *prev)),
             }
             curr_node_add = node.get_next();
             if curr_node_add == start_node {
@@ -268,12 +267,12 @@ impl Sequitur {
 
     fn remove_digram_from_registry(&mut self, digram: Digram) {
         println!("Removing digram {:?}", digram);
-        for elem in vec![digram.0, digram.1] {
-            match self.is_rule(elem) {
+        for gram in vec![digram.0, digram.1] {
+            match self.is_rule(gram) {
                 Some(rule_idx) => {
-                    todo!("Some case");
-                }
-                None => { /* Do nothing */ }
+                    todo!("Decrement rule {} counter", gram);
+            }
+            None => { /* Do nothing */ }
             }
         }
         self.digram.remove(&digram);
@@ -287,14 +286,14 @@ impl Sequitur {
             .as_ref()
             .expect("Node should exist")
         {
-            Node::Elem { elem, .. } => old_digrams.push((*elem, old_node.get_elem())),
+            Node::Gram { gram, .. } => old_digrams.push((*gram, old_node.get_gram())),
             _else => {}
         }
         match self.node[old_next_node.get_next()]
             .as_ref()
             .expect("Node should exist")
         {
-            Node::Elem { elem, .. } => old_digrams.push((old_next_node.get_elem(), *elem)),
+            Node::Gram { gram, .. } => old_digrams.push((old_next_node.get_gram(), *gram)),
             _else => {}
         }
         (old_node.get_prev(), old_digrams)
@@ -310,14 +309,12 @@ impl Sequitur {
         let new_rule = self.new_rule();
         println!("Inserting {:?}", digram);
         self.drule.insert(digram, new_rule);
-        
-
 
         // Push the data for this digram
         // TODO: Reuse some already created rule
         let digram_start = self.rule_push_back(new_rule, digram.0);
         self.rule_push_back(new_rule, digram.1);
-        self.digram.insert(digram, digram_start.expect("Newly created digram"));
+        self.digram.insert(digram, digram_start);
         println!("Before poping");
         self.debug();
         let mut new_positions: Vec<Link> = vec![];
@@ -345,27 +342,27 @@ impl Sequitur {
         for &p in &final_positions {
             match self.node[p]
                 .as_ref()
-                .expect("Node is the second element of a old digram")
+                .expect("Node is the second grament of a old digram")
             {
-                Node::Elem {
-                    elem: curr_elem,
+                Node::Gram {
+                    gram: curr_gram,
                     prev,
                     next,
                 } => {
                     match self.node[*prev].as_ref().expect("Node should exist") {
-                        Node::Elem {
-                            elem: prev_elem, ..
+                        Node::Gram {
+                            gram: prev_gram, ..
                         } => {
-                            new_digrams.insert(((*prev_elem, *curr_elem), *prev));
+                            new_digrams.insert(((*prev_gram, *curr_gram), *prev));
                         }
                         _else => { /* We do not care */ }
                     }
 
                     match self.node[*next].as_ref().expect("Node should exist") {
-                        Node::Elem {
-                            elem: next_elem, ..
+                        Node::Gram {
+                            gram: next_gram, ..
                         } => {
-                            new_digrams.insert(((*curr_elem, *next_elem), p));
+                            new_digrams.insert(((*curr_gram, *next_gram), p));
                         }
                         _else => { /* We do not care */ }
                     }
@@ -387,18 +384,54 @@ impl Sequitur {
     }
 
     fn get_digrams(&self) -> HashSet<(usize, usize)> {
-        let digram: HashSet<(Elem, Elem)> = self.digram.keys().map(|&(d0, d1)| (d0, d1)).collect();
+        let digram: HashSet<(Gram, Gram)> = self.digram.keys().map(|&(d0, d1)| (d0, d1)).collect();
 
         digram
     }
 
-    fn add_digram(&mut self, digram: Digram, pos: usize) {
+    fn rewrite_digram_as_existing_rule(&mut self, rule: RuleLabel, pos: Link) {
+        let rule_idx = self.rule_label_to_rule_idx(rule);
+        self.rule[rule_idx].up();
+
+        let (node_before_digram_add, old_digrams) = self.remove_digram_starting_at(pos);
+
+        for &odigram in &old_digrams {
+            self.remove_digram_from_registry(odigram);
+        }
+
+        let rule_node_add = self.insert_after_and_fix(node_before_digram_add, rule);
+
+        match &self.node[node_before_digram_add]
+            .as_ref()
+            .expect("Node exists")
+        {
+            Node::Gram { gram, .. } => self.add_digram((*gram, rule), node_before_digram_add),
+            _else => { /* Do nothing */ }
+        }
+
+        let next_node_add = self.node[rule_node_add]
+            .as_ref()
+            .expect("New Node for Rule")
+            .get_next();
+
+        match self.node[next_node_add].as_ref().expect("Node exist") {
+            Node::Gram { gram, .. } => self.add_digram((rule, *gram), rule_node_add),
+            _else => { /* Do nothing */ }
+        }
+    }
+
+    fn add_digram(&mut self, digram: Digram, pos: Link) {
         //Sequitur::debug_digram_pos(digram, pos);
 
         match self.digram.get(&digram) {
-            Some(prev_pos) => {
-                self.ensure_digram_uniqueness(digram, vec![*prev_pos, pos]);
-            }
+            Some(prev_pos) => match self.drule.get(&digram) {
+                None => self.ensure_digram_uniqueness(digram, vec![*prev_pos, pos]),
+                Some(rule) => {
+                    println!("Rewrite digram {:?} as rule {}", digram, rule);
+                    self.rewrite_digram_as_existing_rule(*rule, pos);
+                    todo!("Rule already exists case");
+                }
+            },
             None => {
                 self.digram.insert(digram, pos);
             }
@@ -426,7 +459,7 @@ impl Sequitur {
 
         let s = self.new_rule();
         let mut cprev: usize = input[0] as usize;
-        let mut pos = self.rule_push_back(s, cprev).unwrap();
+        let mut pos = self.rule_push_back(s, cprev);
 
         for cat in &input[1..] {
             // self.debug();
@@ -436,7 +469,7 @@ impl Sequitur {
             let next_pos = self.rule_push_back(s, cat);
 
             self.add_digram(digram, pos);
-            pos = next_pos.unwrap();
+            pos = next_pos;
             cprev = cat;
         }
 
@@ -451,7 +484,7 @@ impl Sequitur {
         }
     }
 
-    fn insert_after_and_fix(&mut self, pos: usize, elem: Elem) -> Link {
+    fn insert_after_and_fix(&mut self, pos: Link, gram: Gram) -> Link {
         let free_pos = self.next_free_pos();
         let next_node_add = self.node[pos].as_ref().unwrap().get_next();
         match &self.node[next_node_add] {
@@ -463,16 +496,16 @@ impl Sequitur {
                         .unwrap()
                         .set_prev(free_pos),
                 );
-                self.node[free_pos] = Some(Node::Elem {
-                    elem: elem,
+                self.node[free_pos] = Some(Node::Gram {
+                    gram: gram,
                     next: next_node_add,
                     prev: pos,
                 });
             }
             None => {
                 self.node[pos] = Some(self.node[pos].as_ref().unwrap().set_next(free_pos));
-                self.node[free_pos] = Some(Node::Elem {
-                    elem: elem,
+                self.node[free_pos] = Some(Node::Gram {
+                    gram: gram,
                     next: pos,
                     prev: pos,
                 });
@@ -480,13 +513,6 @@ impl Sequitur {
             }
         }
         return free_pos;
-    }
-
-    pub fn insert_after(&mut self, pos: usize, elem: Elem) -> Option<Link> {
-        match self.pos_exists(pos) {
-            Some(pos) => Some(self.insert_after_and_fix(pos, elem)),
-            None => None,
-        }
     }
 
     fn pop_and_fix(&mut self, pos: usize) -> Node {
@@ -518,11 +544,11 @@ impl Sequitur {
         }
     }
 
-    pub fn pop_at(&mut self, pos: usize) -> Option<Elem> {
+    pub fn pop_at(&mut self, pos: usize) -> Option<Gram> {
         // Make so it pops the node
         match self.pos_exists(pos) {
             Some(pos) => match self.pop_and_fix(pos) {
-                Node::Elem { elem, .. } => Some(elem),
+                Node::Gram { gram, .. } => Some(gram),
                 _else => None,
             },
             None => None,
@@ -553,7 +579,7 @@ mod sequitur_tests {
 
         for i in 0..n {
             let e = i;
-            assert_eq!(seq.rule_push_back(s, e), Some(i + 1));
+            assert_eq!(seq.rule_push_back(s, e), i + 1);
             v.push(e);
         }
 
@@ -569,19 +595,19 @@ mod sequitur_tests {
         let mut v = vec![s];
         seq.debug();
         for b in input.iter() {
-            seq.rule_push_back(s, (*b).into()).unwrap();
+            seq.rule_push_back(s, (*b).into());
             v.push((*b).into());
         }
 
         //assert_eq!(v, seq.fetch_rule(s));
         seq.debug();
-        // println!("{}", seq.node[1].as_ref().unwrap().elem);
+        // println!("{}", seq.node[1].as_ref().unwrap().gram);
         seq.pop_at(1);
         seq.debug();
         seq.pop_at(2);
         seq.debug();
         // TODO: Check if sequence is implemented correctly
-        //println!("{}", seq.node[2].as_ref().unwrap().elem);
+        //println!("{}", seq.node[2].as_ref().unwrap().gram);
         //assert_eq!(true, false);
     }
 
@@ -599,7 +625,7 @@ mod sequitur_tests {
             let (a, b) = (a.into(), b.into());
             println!("{:?} {:?}", a, b);
             let next_pos = seq.rule_push_back(s, b);
-            seq.add_digram((a, b), pos.unwrap());
+            seq.add_digram((a, b), pos);
             pos = next_pos;
         }
 
@@ -668,10 +694,7 @@ mod sequitur_tests {
 
         println!("digramset={:?}", digramset);
         seq.debug();
-        assert_eq!(
-            digramset,
-            HashSet::from([
-            ]));
+        assert_eq!(digramset, HashSet::from([]));
     }
 
     //#[test]
