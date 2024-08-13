@@ -43,4 +43,36 @@ impl Digram {
     pub fn pair(&self) -> SymbolPair {
         SymbolPair(self.left_symbol, self.right_symbol)
     }
+
+    pub fn overlap(&self, other: &Digram) -> bool {
+        (self.rule_id == other.rule_id)
+            && ((self.right_index == other.left_index && self.left_symbol == other.right_symbol)
+                || (other.right_index == self.left_index && other.left_symbol == self.right_symbol))
+    }
+}
+
+#[cfg(test)]
+mod test_symbol {
+    use super::*;
+    #[test]
+    fn test_overlap() {
+        let a = Symbol::Char('a');
+        let b = Symbol::Char('b');
+
+        let d1 = Digram::new(0, (a, 0), (a, 1));
+        let d2 = Digram::new(0, (a, 1), (a, 2));
+
+        assert!(d1.overlap(&d1));
+        assert!(d1.overlap(&d2));
+        assert!(d2.overlap(&d1));
+
+        let d3 = Digram::new(0, (a, 2), (b, 3));
+        assert!(!d2.overlap(&d3));
+        assert!(!d3.overlap(&d2));
+
+        let d1 = Digram::new(0, (a, 0), (a, 1));
+        let d2 = Digram::new(0, (a, 2), (a, 3));
+
+        assert!(!d1.overlap(&d2));
+    }
 }

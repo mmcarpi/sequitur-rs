@@ -35,16 +35,16 @@ impl<T: Copy + Clone> Node<T> {
     }
 }
 
-pub struct DLL<T: Copy + Clone> {
+pub struct Dll<T: Copy + Clone> {
     list: Vec<Node<T>>,
     head: Option<usize>,
     tail: Option<usize>,
     free: Vec<usize>,
 }
 
-impl<T: Copy + Clone> DLL<T> {
+impl<T: Copy + Clone> Dll<T> {
     pub fn new() -> Self {
-        DLL {
+        Dll {
             list: Vec::new(),
             head: None,
             tail: None,
@@ -66,12 +66,24 @@ impl<T: Copy + Clone> DLL<T> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.list.len() - self.free.len()
+    }
+
     pub fn get_head(&self) -> Option<usize> {
         self.head
     }
 
     pub fn get_tail(&self) -> Option<usize> {
         self.tail
+    }
+
+    pub fn get_head_content(&self) -> Option<(T, usize)> {
+        self.head.map(|idx| (self.list[idx].symbol, idx))
+    }
+
+    pub fn get_tail_content(&self) -> Option<(T, usize)> {
+        self.tail.map(|idx| (self.list[idx].symbol, idx))
     }
 
     pub fn push_after(&mut self, idx: usize, symbol: T) -> usize {
@@ -145,7 +157,7 @@ impl<T: Copy + Clone> DLL<T> {
     }
 }
 
-impl<T: Copy + Clone> Index<usize> for DLL<T> {
+impl<T: Copy + Clone> Index<usize> for Dll<T> {
     type Output = Node<T>;
     fn index(&self, index: usize) -> &Node<T> {
         &self.list[index]
@@ -158,7 +170,7 @@ mod test_dll {
     #[test]
     fn test_push() {
         let s = "abab";
-        let mut dll = DLL::new();
+        let mut dll = Dll::new();
 
         for c in s.chars() {
             dll.push(c);
@@ -170,7 +182,7 @@ mod test_dll {
 
     #[test]
     fn test_push_after() {
-        let mut dll = DLL::new();
+        let mut dll = Dll::new();
         let (a, b, c) = ('a', 'b', 'c');
         let fst = dll.push(a);
         let snd = dll.push(b);
@@ -180,20 +192,24 @@ mod test_dll {
 
         dll.push_after(fst, c);
         assert_eq!(dll.to_vec(), vec![a, c, b, a, b]);
+        assert_eq!(dll.len(), 5);
 
         dll.push_after(snd, c);
         assert_eq!(dll.to_vec(), vec![a, c, b, c, a, b]);
+        assert_eq!(dll.len(), 6);
 
         dll.push_after(trd, c);
         assert_eq!(dll.to_vec(), vec![a, c, b, c, a, c, b]);
+        assert_eq!(dll.len(), 7);
 
         dll.push_after(fth, c);
         assert_eq!(dll.to_vec(), vec![a, c, b, c, a, c, b, c]);
+        assert_eq!(dll.len(), 8);
     }
 
     #[test]
     fn test_push_pop() {
-        let mut dll = DLL::new();
+        let mut dll = Dll::new();
 
         let (a, b, c) = ('a', 'b', 'c');
 
@@ -214,11 +230,12 @@ mod test_dll {
         assert_eq!(dll.head, Some(mid));
 
         assert_eq!(dll[trd].prev, Some(mid));
+        assert_eq!(dll.len(), 3);
     }
 
     #[test]
     fn test_append_with_push_after() {
-        let mut dll = DLL::new();
+        let mut dll = Dll::new();
 
         let (a, b) = ('a', 'b');
 
@@ -238,5 +255,6 @@ mod test_dll {
         let fth = dll.push_after(trd, b);
         assert_eq!(dll.tail, Some(fth));
         assert_eq!(dll.to_vec(), vec![a, a, b, b]);
+        assert_eq!(dll.len(), 4);
     }
 }

@@ -29,6 +29,7 @@ impl Grammar {
 pub struct State {
     digrams: HashMap<SymbolPair, Digram>,
     rtable: HashMap<SymbolPair, usize>,
+    inv_rtable: HashMap<usize, SymbolPair>,
     rule_usage: HashMap<usize, HashSet<RuleUsage>>,
 }
 
@@ -37,17 +38,18 @@ impl State {
         Self {
             digrams: HashMap::new(),
             rtable: HashMap::new(),
+            inv_rtable: HashMap::new(),
             rule_usage: HashMap::new(),
         }
     }
 
     pub fn insert_digram(&mut self, digram: Digram) {
-        println!("INSERT {}", digram.pair());
+        //println!("INSERT {}", digram.pair());
         self.digrams.insert(digram.pair(), digram);
     }
 
     pub fn remove_digram(&mut self, digram: Digram) -> Option<Digram> {
-        println!("REMOVE {}", digram.pair());
+        //println!("REMOVE {}", digram.pair());
         self.digrams.remove(&digram.pair())
     }
 
@@ -58,64 +60,109 @@ impl State {
             self.rule_usage.insert(rule_id, HashSet::from([rule_usage]));
         }
     }
-
-    pub fn remove_rule_usage(
-        &mut self,
-        rule_id: usize,
-        rule_usage: RuleUsage,
-    ) -> Option<RuleUsage> {
-        match self.rule_usage.remove(&rule_id) {
-            Some(mut rule_usage_set) => {
-                rule_usage_set.remove(&rule_usage);
-                if rule_usage_set.len() == 1 {
-                    Some(rule_usage)
-                } else {
-                    self.rule_usage.insert(rule_id, rule_usage_set);
-                    None
-                }
-            }
-            _ => panic!("Rule {} not found!", rule_id),
-        }
-    }
 }
 
 pub fn show_state(state: &State) {
-    println!("DIGRAMS:");
+    //println!("DIGRAMS: {{");
     for (pair, _digram) in state.digrams.iter() {
-        println!("{}", &pair);
+        //println!("{}", &pair);
     }
-    println!("RTABLE:");
+    //println!("}}");
+
+    //println!("RTABLE: {{");
     for (pair, rule_id) in state.rtable.iter() {
-        println!("{} -> {}", &pair, rule_id);
+        //println!("{} -> {}", &pair, rule_id);
     }
-    println!("USAGE:");
+    //println!("}}");
+
+    //println!("USAGE: {{");
     for (rule_id, rule_usage_set) in state.rule_usage.iter() {
-        println!("{} is being used in {:?}", rule_id, rule_usage_set);
+        //println!("R{} <- {:#?}", rule_id, rule_usage_set);
     }
+    //println!("}}");
 }
 
 pub fn show_rules(grammar: &Grammar) {
-    println!("RULES:");
+    //println!("RULES: {{");
 
     for (rule_id, rule) in grammar.rules.iter() {
-        println!("{} -> {}", &rule_id, &rule);
+        //println!("R{} -> {}", &rule_id, &rule);
+    }
+    //println!("}}");
+}
+
+pub fn insert_rule_usage(
+    grammar: &mut Grammar,
+    state: &mut State,
+    rule_id: usize,
+    rule_usage: RuleUsage,
+) {
+    //println!("insert_rule_usage({}, {:?})", rule_id, rule_usage);
+    if let Some(rule_usage_set) = state.rule_usage.get_mut(&rule_id) {
+        rule_usage_set.insert(rule_usage);
+    } else {
+        state
+            .rule_usage
+            .insert(rule_id, HashSet::from([rule_usage]));
+    }
+}
+
+pub fn remove_rule_usage(
+    grammar: &mut Grammar,
+    state: &mut State,
+    rule_id: usize,
+    rule_usage: RuleUsage,
+) {
+    //println!("remove_rule_usage({}, {:?})", rule_id, rule_usage);
+    let mut rule_usage_set = state
+        .rule_usage
+        .remove(&rule_id)
+        .expect("rule_usage_set not found!");
+
+    if rule_usage_set.len() == 2 {
+        rule_usage_set.remove(&rule_usage);
+        for last_usage in rule_usage_set.into_iter() {
+            expand_rule(grammar, state, rule_id, last_usage);
+            if let Some(pair) = state.inv_rtable.remove(&rule_id) {
+                state.rtable.remove(&pair);
+            }
+
+            if let Some(pair) = state.inv_rtable.remove(&last_usage.get_rule_id()) {
+                state.rtable.remove(&pair);
+            }
+        }
+    } else {
+        rule_usage_set.remove(&rule_usage);
+        state.rule_usage.insert(rule_id, rule_usage_set);
     }
 }
 
 pub fn expand_rule(
+    grammar: &mut Grammar,
     state: &mut State,
-    target_idx: usize,
-    target_rule: &mut Rule,
-    old_rule: &mut Rule,
+    rule_id: usize,
+    last_usage: RuleUsage,
 ) {
-    if let Some(digram) = target_rule.digram_starting_at(target_idx) {
+    //println!("expand_rule({},\n            {:?})", rule_id, last_usage);
+    let mut old_rule = grammar
+        .rules
+        .remove(&rule_id)
+        .expect(&format!("old_rule Rule({}) not found!", rule_id));
+
+    let target_rule = grammar
+        .rules
+        .get_mut(&last_usage.get_rule_id())
+        .expect(&format!("target_rule Rule({}) not found!", rule_id));
+
+    if let Some(digram) = target_rule.digram_starting_at(last_usage.get_index()) {
         state.remove_digram(digram);
     }
 
-    if let Some(digram) = target_rule.digram_ending_at(target_idx) {
+    if let Some(digram) = target_rule.digram_ending_at(last_usage.get_index()) {
         state.remove_digram(digram);
     }
-
+    //println!("loop start");
+    let index_after_last_usage = target_rule.rhs[last_usage.get_index()].get_next();
     let mut tail = old_rule.rhs.get_tail();
     while let Some(prev) = tail {
         let node = old_rule.rhs.pop(prev);
@@ -130,34 +177,69 @@ pub fn expand_rule(
             ));
         }
 
-        let nidx = target_rule.rhs.push_after(target_idx, node.get_symbol());
+        let nidx = target_rule
+            .rhs
+            .push_after(last_usage.get_index(), node.get_symbol());
+
         if let Symbol::Rule(other_rule) = node.get_symbol() {
-            // TODO: Check if we can do this with only one method
-            state.remove_rule_usage(
-                other_rule,
-                RuleUsage::new(old_rule.get_id(), node.get_addr()),
-            );
-            state.insert_rule_usage(other_rule, RuleUsage::new(target_rule.get_id(), nidx));
+            let rule_usage_set = state
+                .rule_usage
+                .get_mut(&other_rule)
+                .expect("rule_usage_set not found");
+            rule_usage_set.remove(&RuleUsage::new(old_rule.get_id(), node.get_addr()));
+            rule_usage_set.insert(RuleUsage::new(target_rule.get_id(), nidx));
         }
 
         if let Some(digram) = target_rule.digram_starting_at(nidx) {
-            state.insert_digram(digram);
+            if Some(digram.get_right_id()) != index_after_last_usage {
+                //println!("INSERTING DIGRAM -> {:?}", digram);
+                state.insert_digram(digram);
+            }
         }
     }
 
-    let popped_node = target_rule.rhs.pop(target_idx);
+    let popped_node = target_rule.rhs.pop(last_usage.get_index());
 
-    if let Some(idx) = popped_node.get_next() {
-        if let Some(digram) = target_rule.digram_ending_at(idx) {
-            state.insert_digram(digram);
-        }
+    let next_digram = match popped_node.get_next() {
+        Some(idx) => target_rule.digram_ending_at(idx),
+        _ => None,
+    };
+
+    let prev_digram = match popped_node.get_prev() {
+        Some(idx) => target_rule.digram_starting_at(idx),
+        _ => None,
+    };
+
+    let last_digram = match index_after_last_usage {
+        Some(idx) => target_rule.digram_ending_at(idx),
+        _ => None,
+    };
+
+    if let Some(new_digram) = next_digram {
+        //println!("next_digram -> {:?}", new_digram);
+        insert_digram(grammar, state, new_digram);
+    }
+
+    if let Some(new_digram) = prev_digram {
+        //println!("prev_digram -> {:?}", new_digram);
+        insert_digram(grammar, state, new_digram);
+    }
+
+    if let Some(new_digram) = last_digram {
+        //println!("last_digram -> {:?}", new_digram);
+        insert_digram(grammar, state, new_digram);
     }
 }
 
 pub fn insert_digram(grammar: &mut Grammar, state: &mut State, new_digram: Digram) {
-    match state.digrams.remove(&new_digram.pair()) {
+    //println!("insert_digram({:?})", new_digram);
+    match state.remove_digram(new_digram) {
         Some(old_digram) => {
-            check_rule_existence(grammar, state, old_digram, new_digram);
+            if !old_digram.overlap(&new_digram) {
+                check_rule_existence(grammar, state, old_digram, new_digram);
+            } else {
+                state.insert_digram(old_digram);
+            }
         }
         None => {
             state.insert_digram(new_digram);
@@ -171,9 +253,14 @@ pub fn check_rule_existence(
     old_digram: Digram,
     new_digram: Digram,
 ) {
+    // println!(
+    //     "check_rule_existence({:?},\n                     {:?})",
+    //     old_digram, new_digram
+    // );
     match state.rtable.get(&new_digram.pair()) {
         Some(rule_id) => {
             replace_digram(grammar, state, new_digram, Symbol::Rule(*rule_id));
+            state.insert_digram(old_digram);
         }
         None => {
             create_new_rule(grammar, state, old_digram, new_digram);
@@ -187,7 +274,13 @@ pub fn push(grammar: &mut Grammar, state: &mut State, rule_id: usize, symbol: Sy
         .get_mut(&rule_id)
         .expect(&format!("Rule {} not found!", rule_id));
 
-    if let Some(new_digram) = rule.push(symbol) {
+    let (idx, option_digram) = rule.push(symbol);
+
+    if let Symbol::Rule(other_rule) = symbol {
+        insert_rule_usage(grammar, state, other_rule, RuleUsage::new(rule_id, idx));
+    }
+
+    if let Some(new_digram) = option_digram {
         insert_digram(grammar, state, new_digram);
     }
 }
@@ -198,7 +291,16 @@ pub fn create_new_rule(
     old_digram: Digram,
     new_digram: Digram,
 ) {
+    // println!(
+    //     "create_new_rule({:?},\n                {:?})",
+    //     old_digram, new_digram
+    // );
     let new_rule_idx = grammar.add_rule();
+
+    push(grammar, state, new_rule_idx, new_digram.get_left_symbol());
+    push(grammar, state, new_rule_idx, new_digram.get_right_symbol());
+    state.rtable.insert(new_digram.pair(), new_rule_idx);
+    state.inv_rtable.insert(new_rule_idx, new_digram.pair());
 
     replace_digrams(
         grammar,
@@ -207,10 +309,6 @@ pub fn create_new_rule(
         new_digram,
         Symbol::Rule(new_rule_idx),
     );
-
-    push(grammar, state, new_rule_idx, new_digram.get_left_symbol());
-    push(grammar, state, new_rule_idx, new_digram.get_right_symbol());
-    state.rtable.insert(new_digram.pair(), new_rule_idx);
 }
 
 pub fn replace_digrams(
@@ -220,49 +318,66 @@ pub fn replace_digrams(
     new_digram: Digram,
     symbol: Symbol,
 ) {
+    println!("begin_replace_digrams!");
     replace_digram(grammar, state, old_digram, symbol);
     replace_digram(grammar, state, new_digram, symbol);
+    println!("end_replace_digrams!");
 }
 
 pub fn replace_digram(grammar: &mut Grammar, state: &mut State, digram: Digram, symbol: Symbol) {
+    println!("replace_digram({:?},\n               {:?})", digram, symbol);
     let rule = grammar.rules.get_mut(&digram.get_rule_id()).unwrap();
+    let rule_id = rule.get_id();
 
     let digram_right_id = digram.get_right_id();
     let rnode = rule.rhs[digram_right_id];
+
+    let digram_left_id = digram.get_left_id();
+    let lnode = rule.rhs[digram_left_id];
 
     if let Some(digram) = rule.digram_starting_at(digram_right_id) {
         state.remove_digram(digram);
     }
 
-    if let Symbol::Rule(rule_id) = rnode.get_symbol() {
-        state.remove_rule_usage(rule_id, RuleUsage::new(rule.get_id(), rnode.get_addr()));
-    }
-
-    let digram_left_id = digram.get_left_id();
-    let lnode = rule.rhs[digram_left_id];
-
     if let Some(digram) = rule.digram_ending_at(digram_left_id) {
         state.remove_digram(digram);
-    }
-
-    if let Symbol::Rule(rule_id) = lnode.get_symbol() {
-        state.remove_rule_usage(rule_id, RuleUsage::new(rule.get_id(), lnode.get_addr()));
     }
 
     rule.rhs.pop(digram_right_id);
     let nidx = rule.rhs.push_after(digram_left_id, symbol);
     rule.rhs.pop(digram_left_id);
 
-    if let Some(digram) = rule.digram_ending_at(nidx) {
-        state.insert_digram(digram);
+    if let Symbol::Rule(other_rule_id) = symbol {
+        state.insert_rule_usage(other_rule_id, RuleUsage::new(rule_id, nidx));
     }
 
-    if let Some(digram) = rule.digram_starting_at(nidx) {
-        state.insert_digram(digram);
+    let new_left_digram = rule.digram_ending_at(nidx);
+    let new_right_digram = rule.digram_starting_at(nidx);
+
+    if let Symbol::Rule(other_rule_id) = rnode.get_symbol() {
+        remove_rule_usage(
+            grammar,
+            state,
+            other_rule_id,
+            RuleUsage::new(rule_id, rnode.get_addr()),
+        );
     }
 
-    if let Symbol::Rule(rule_id) = symbol {
-        state.insert_rule_usage(rule_id, RuleUsage::new(rule.get_id(), nidx));
+    if let Some(new_digram) = new_left_digram {
+        insert_digram(grammar, state, new_digram);
+    }
+
+    if let Symbol::Rule(other_rule_id) = lnode.get_symbol() {
+        remove_rule_usage(
+            grammar,
+            state,
+            other_rule_id,
+            RuleUsage::new(rule_id, lnode.get_addr()),
+        );
+    }
+
+    if let Some(new_digram) = new_right_digram {
+        insert_digram(grammar, state, new_digram)
     }
 }
 
@@ -354,20 +469,37 @@ mod test_state {
 
     #[test]
     fn test_expand_rule() {
-        // let mut state = State::new();
-        // let s = state.add_rule();
+        let mut grammar = Grammar::new();
+        let mut state = State::new();
+        let s = grammar.add_rule();
 
-        // let a = Symbol::Char('a');
-        // let b = Symbol::Char('b');
-        // let c = Symbol::Char('c');
-        // let d = Symbol::Char('d');
-        // let input = vec![a, b, c, d, b, c, a, b, c, d];
+        let a = Symbol::Char('a');
+        let b = Symbol::Char('b');
+        let c = Symbol::Char('c');
+        let d = Symbol::Char('d');
+        let input = vec![a, b, c, d, b, c, a, b, c, d];
 
-        // for (i, symbol) in input.into_iter().enumerate() {
-        //     println!("{}-th symbol: {:?}", i, symbol);
-        //     state.push(s, symbol);
-        // }
+        for (i, symbol) in input.into_iter().enumerate() {
+            push(&mut grammar, &mut state, s, symbol);
+        }
 
-        // assert_eq!(state.rules.len(), 3);
+        assert_eq!(grammar.rules.len(), 3);
+    }
+
+    #[test]
+    fn test_overlap() {
+        let mut grammar = Grammar::new();
+        let mut state = State::new();
+
+        let s = grammar.add_rule();
+
+        let a = Symbol::Char('a');
+        let r = Symbol::Rule(s + 1);
+        push(&mut grammar, &mut state, s, a);
+        push(&mut grammar, &mut state, s, a);
+        push(&mut grammar, &mut state, s, a);
+        assert_eq!(grammar.rules.get(&s).unwrap().rhs_to_vec(), vec![a, a, a]);
+        push(&mut grammar, &mut state, s, a);
+        assert_eq!(grammar.rules.get(&s).unwrap().rhs_to_vec(), vec![r, r]);
     }
 }

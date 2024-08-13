@@ -1,30 +1,38 @@
 use std::fmt;
 
 use crate::digram::Digram;
-use crate::dll::DLL;
+use crate::dll::Dll;
 use crate::symbol::Symbol;
 
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 pub struct RuleUsage {
     rule_id: usize,
-    idx: usize,
+    index: usize,
 }
 
 impl RuleUsage {
-    pub fn new(rule_id: usize, idx: usize) -> Self {
-        Self { rule_id, idx }
+    pub fn new(rule_id: usize, index: usize) -> Self {
+        Self { rule_id, index }
+    }
+
+    pub fn get_rule_id(&self) -> usize {
+        self.rule_id
+    }
+
+    pub fn get_index(&self) -> usize {
+        self.index
     }
 }
 
 pub struct Rule {
-    pub rhs: DLL<Symbol>,
+    pub rhs: Dll<Symbol>,
     id: usize,
 }
 
 impl Rule {
     pub fn new(id: usize) -> Self {
         Self {
-            rhs: DLL::new(),
+            rhs: Dll::new(),
             id,
         }
     }
@@ -33,9 +41,9 @@ impl Rule {
         self.id
     }
 
-    pub fn push(&mut self, s: Symbol) -> Option<Digram> {
+    pub fn push(&mut self, s: Symbol) -> (usize, Option<Digram>) {
         let idx = self.rhs.push(s);
-        self.digram_ending_at(idx)
+        (idx, self.digram_ending_at(idx))
     }
 
     pub fn digram_ending_at(&self, idx: usize) -> Option<Digram> {
@@ -65,19 +73,31 @@ impl Rule {
     pub fn rhs_to_vec(&self) -> Vec<Symbol> {
         self.rhs.to_vec()
     }
+
+    pub fn is_digram(&self) -> Option<Digram> {
+        match self.rhs.len() {
+            2 => {
+                let left = self.rhs.get_head_content().unwrap();
+                let right = self.rhs.get_tail_content().unwrap();
+                Some(Digram::new(self.id, left, right))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Rule {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut s = String::new();
-        s.push_str("[");
+        s.push('[');
 
         let mut head = self.rhs.get_head();
         while let Some(idx) = head {
             s.push_str(&format!(" {}", self.rhs[idx].get_symbol()));
             head = self.rhs[idx].get_next();
         }
-        s.push_str(" ]");
+        s.push(' ');
+        s.push(']');
         write!(f, "{}", s)
     }
 }
